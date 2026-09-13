@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -152,6 +153,21 @@ func (h *hub) remove(c *client) bool {
 	return false
 }
 
+// roster snapshots the room's current member names, excluding exclude.
+// Sorted so every newcomer replays presence in the same order.
+func (h *hub) roster(room, exclude string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var names []string
+	for name := range h.rooms[room] {
+		if name != exclude {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // route relays one validated client frame, stamped server-side.
 func (h *hub) route(c *client, m protocol.Message) {
 	switch m.Type {
@@ -238,7 +254,7 @@ func handleConn(h *hub, conn net.Conn) {
 
 	// Replay history straight to the newcomer before its writer starts.
 	if h.store != nil {
-		if hist, herr := h.store.Recent(c.room, 50); herr != nil {
+		if hist, herr := h.store.Recent(c.room, c.name, 50); herr != nil {
 			log.Printf("history replay: %v", herr)
 		} else {
 			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -248,6 +264,15 @@ func handleConn(h *hub, conn net.Conn) {
 					return
 				}
 			}
+		}
+	}
+	// Catch the newcomer up on who is already here. Synthetic joins go
+	// to this conn only; the broadcast below announces the newcomer.
+	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	for _, name := range h.roster(c.room, c.name) {
+		if werr := protocol.WriteJSON(conn, protocol.Message{V: 1, Type: protocol.TypeJoin, From: name, Room: c.room}); werr != nil {
+			conn.Close()
+			return
 		}
 	}
 
@@ -299,7 +324,7 @@ func wsHandler(h *hub) http.HandlerFunc {
 		ctx := r.Context()
 
 		if h.store != nil {
-			if hist, herr := h.store.Recent(c.room, 50); herr != nil {
+			if hist, herr := h.store.Recent(c.room, c.name, 50); herr != nil {
 				log.Printf("history replay: %v", herr)
 			} else {
 				for _, m := range hist {
@@ -312,6 +337,16 @@ func wsHandler(h *hub) http.HandlerFunc {
 						return
 					}
 				}
+			}
+		}
+		for _, name := range h.roster(c.room, c.name) {
+			wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			werr := wsjson.Write(wctx, ws, protocol.Message{V: 1, Type: protocol.TypeJoin, From: name, Room: c.room})
+			cancel()
+			if werr != nil {
+				h.remove(c)
+				ws.Close(websocket.StatusInternalError, "")
+				return
 			}
 		}
 

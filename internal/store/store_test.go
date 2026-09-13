@@ -25,7 +25,7 @@ func TestRoundTripFile(t *testing.T) {
 			t.Fatalf("Save(%+v): %v", m, err)
 		}
 	}
-	got, err := s.Recent("general", 50)
+	got, err := s.Recent("general", "bob", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,15 @@ func TestRoundTripFile(t *testing.T) {
 	if got[0].Body != "hello" || got[1].To != "bob" {
 		t.Fatalf("unexpected history: %+v", got)
 	}
-	empty, err := s.Recent("sports", 50)
+	// DMs stay private: a third user sees the public message only.
+	stranger, err := s.Recent("general", "carol", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stranger) != 1 || stranger[0].Body != "hello" {
+		t.Fatalf("stranger history = %+v, want only public msg", stranger)
+	}
+	empty, err := s.Recent("sports", "bob", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +61,7 @@ func TestMemoryDB(t *testing.T) {
 	if err := s.Save(protocol.Message{V: 1, Type: protocol.TypeMsg, From: "a", Room: "r", Body: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Recent("r", 10)
+	got, err := s.Recent("r", "a", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -73,8 +73,9 @@ func (s *Store) Save(m protocol.Message) error {
 }
 
 // Recent returns up to limit persisted msg/dm frames for room, oldest first.
-// DMs are included so a rejoiner sees their private context too.
-func (s *Store) Recent(room string, limit int) ([]protocol.Message, error) {
+// Public messages replay for everyone; DMs only replay for their sender or
+// recipient so one rejoiner never sees another pair's private context.
+func (s *Store) Recent(room, user string, limit int) ([]protocol.Message, error) {
 	if s == nil {
 		return nil, nil
 	}
@@ -82,8 +83,10 @@ func (s *Store) Recent(room string, limit int) ([]protocol.Message, error) {
 		limit = historyLimit
 	}
 	rows, err := s.db.Query(
-		`SELECT from_name, to_name, type, body FROM messages WHERE room = ? ORDER BY id DESC LIMIT ?`,
-		room, limit,
+		`SELECT from_name, to_name, type, body FROM messages
+		 WHERE room = ? AND (type != 'dm' OR from_name = ? OR to_name = ?)
+		 ORDER BY id DESC LIMIT ?`,
+		room, user, user, limit,
 	)
 	if err != nil {
 		return nil, err
