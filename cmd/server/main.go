@@ -5,6 +5,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -237,6 +238,8 @@ func handleConn(h *hub, conn net.Conn) {
 func main() {
 	addr := flag.String("addr", ":9000", "listen address, e.g. :9000 or 127.0.0.1:9000")
 	dbPath := flag.String("db", "chat.db", "sqlite history file (persisted per room)")
+	tlsCert := flag.String("tls-cert", "", "TLS cert file (enables TLS when set with --tls-key)")
+	tlsKey := flag.String("tls-key", "", "TLS key file")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -245,12 +248,28 @@ func main() {
 	}
 	defer st.Close()
 
-	ln, err := net.Listen("tcp", *addr)
-	if err != nil {
-		log.Fatalf("listen %s: %v", *addr, err)
+	var ln net.Listener
+	if *tlsCert != "" || *tlsKey != "" {
+		if *tlsCert == "" || *tlsKey == "" {
+			log.Fatalf("need both --tls-cert and --tls-key")
+		}
+		cert, err := tls.LoadX509KeyPair(*tlsCert, *tlsKey)
+		if err != nil {
+			log.Fatalf("load tls: %v", err)
+		}
+		ln, err = tls.Listen("tcp", *addr, &tls.Config{Certificates: []tls.Certificate{cert}})
+		if err != nil {
+			log.Fatalf("listen tls %s: %v", *addr, err)
+		}
+		fmt.Printf("tcp-chat server listening with TLS on %s (db %s)\n", ln.Addr(), *dbPath)
+	} else {
+		ln, err = net.Listen("tcp", *addr)
+		if err != nil {
+			log.Fatalf("listen %s: %v", *addr, err)
+		}
+		fmt.Printf("tcp-chat server listening on %s (db %s)\n", ln.Addr(), *dbPath)
 	}
 	defer ln.Close()
-	fmt.Printf("tcp-chat server listening on %s (db %s)\n", ln.Addr(), *dbPath)
 
 	h := &hub{rooms: make(map[string]map[string]*client), store: st}
 	for {

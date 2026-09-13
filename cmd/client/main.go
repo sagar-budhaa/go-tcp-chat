@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -51,6 +52,8 @@ func main() {
 	addr := flag.String("addr", "localhost:9000", "server address, e.g. localhost:9000")
 	name := flag.String("name", "", "chat name (required, max 32 chars, unique per room)")
 	room := flag.String("room", protocol.DefaultRoom, "room to join")
+	useTLS := flag.Bool("tls", false, "connect with TLS")
+	insecure := flag.Bool("insecure", false, "skip TLS cert verification (dev self-signed certs)")
 	flag.Parse()
 	if *name == "" || len(*name) > protocol.MaxNameLen {
 		log.Fatalf("need --name of 1-%d chars", protocol.MaxNameLen)
@@ -59,7 +62,20 @@ func main() {
 		log.Fatalf("need --room of 1-%d chars", protocol.MaxRoomLen)
 	}
 
-	conn, err := net.Dial("tcp", *addr)
+	var conn net.Conn
+	var err error
+	if *useTLS {
+		host, _, splitErr := net.SplitHostPort(*addr)
+		if splitErr != nil {
+			host = *addr
+		}
+		conn, err = tls.Dial("tcp", *addr, &tls.Config{
+			ServerName:         host,
+			InsecureSkipVerify: *insecure,
+		})
+	} else {
+		conn, err = net.Dial("tcp", *addr)
+	}
 	if err != nil {
 		log.Fatalf("dial %s: %v", *addr, err)
 	}
