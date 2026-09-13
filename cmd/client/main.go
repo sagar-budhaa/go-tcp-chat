@@ -1,5 +1,5 @@
-// Command client: connects to a tcp-chat server, sends each stdin line as
-// one length-prefixed message, prints received broadcasts to stdout.
+// Command client: connects to a tcp-chat server as --name, sends each
+// stdin line as a chat message, prints messages and join/leave notices.
 package main
 
 import (
@@ -14,22 +14,50 @@ import (
 	"tcp-chat/internal/protocol"
 )
 
+func print(m protocol.Message) {
+	switch m.Type {
+	case protocol.TypeMsg:
+		fmt.Printf("[%s] %s\n> ", m.From, m.Body)
+	case protocol.TypeJoin:
+		fmt.Printf("*** %s joined ***\n> ", m.From)
+	case protocol.TypeLeave:
+		fmt.Printf("*** %s left ***\n> ", m.From)
+	}
+}
+
 func main() {
 	addr := flag.String("addr", "localhost:9000", "server address, e.g. localhost:9000")
+	name := flag.String("name", "", "chat name (required, max 32 chars, must be unique)")
 	flag.Parse()
+	if *name == "" || len(*name) > protocol.MaxNameLen {
+		log.Fatalf("need --name of 1-%d chars", protocol.MaxNameLen)
+	}
 
 	conn, err := net.Dial("tcp", *addr)
 	if err != nil {
 		log.Fatalf("dial %s: %v", *addr, err)
 	}
 	defer conn.Close()
-	fmt.Printf("connected to %s (type /quit to exit)\n", *addr)
+
+	if err := protocol.WriteJSON(conn, protocol.Message{V: 1, Type: protocol.TypeHello, From: *name}); err != nil {
+		log.Fatalf("hello: %v", err)
+	}
+	// The server answers a bad handshake with an error frame, not silence.
+	first, err := protocol.ReadJSON(conn)
+	if err != nil {
+		log.Fatalf("handshake: %v", err)
+	}
+	if first.Type == protocol.TypeError {
+		log.Fatalf("server rejected: %s", first.Body)
+	}
+	print(first)
+	fmt.Printf("connected to %s as %s (type /quit to exit)\n> ", *addr, *name)
 
 	// Reader: server -> stdout. Exits process on disconnect since stdin
 	// would otherwise block forever with nowhere to send.
 	go func() {
 		for {
-			payload, err := protocol.ReadMessage(conn)
+			m, err := protocol.ReadJSON(conn)
 			if err != nil {
 				if err == io.EOF || err == io.ErrUnexpectedEOF {
 					fmt.Println("\nserver closed the connection")
@@ -38,14 +66,17 @@ func main() {
 				}
 				os.Exit(0)
 			}
-			fmt.Printf("%s\n> ", payload)
+			if m.Type == protocol.TypeError {
+				fmt.Printf("\nserver error: %s\n", m.Body)
+				os.Exit(1)
+			}
+			print(m)
 		}
 	}()
 
 	// Writer: stdin lines -> server.
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 64*1024), protocol.MaxMessageSize)
-	fmt.Print("> ")
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "/quit" {
@@ -55,7 +86,7 @@ func main() {
 			fmt.Print("> ")
 			continue
 		}
-		if err := protocol.WriteMessage(conn, []byte(line)); err != nil {
+		if err := protocol.WriteJSON(conn, protocol.Message{V: 1, Type: protocol.TypeMsg, Body: line}); err != nil {
 			log.Fatalf("send: %v", err)
 		}
 		fmt.Print("> ")
