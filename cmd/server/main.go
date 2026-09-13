@@ -1,6 +1,6 @@
-// Command server: multi-client TCP chat. Clients introduce themselves
-// with a hello frame; chat messages are relayed stamped with the
-// sender's name, plus join/leave notices to all clients.
+// Command server: multi-client TCP chat with rooms. Clients introduce
+// themselves with a hello frame naming a room; chat messages and
+// join/leave notices stay within that room.
 package main
 
 import (
@@ -25,18 +25,32 @@ const handshakeTimeout = 10 * time.Second
 type client struct {
 	conn net.Conn
 	name string
+	room string
 	send chan protocol.Message
 }
 
 type hub struct {
-	mu      sync.Mutex
-	clients map[string]*client
+	mu sync.Mutex
+	// rooms maps room -> name -> client. Names need only be unique
+	// within their room.
+	rooms map[string]map[string]*client
 }
 
-func (h *hub) broadcast(m protocol.Message) {
+// members returns the room's set, creating it on first use. Caller must
+// hold h.mu.
+func (h *hub) members(room string) map[string]*client {
+	m, ok := h.rooms[room]
+	if !ok {
+		m = make(map[string]*client)
+		h.rooms[room] = m
+	}
+	return m
+}
+
+func (h *hub) broadcast(room string, m protocol.Message) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for _, c := range h.clients {
+	for _, c := range h.rooms[room] {
 		select {
 		case c.send <- m:
 		default:
@@ -44,7 +58,7 @@ func (h *hub) broadcast(m protocol.Message) {
 			// remove it. Closing conn unblocks its reader.
 			log.Printf("client slow, disconnecting: %s (%s)", c.name, c.conn.RemoteAddr())
 			go c.conn.Close()
-			delete(h.clients, c.name)
+			delete(h.rooms[room], c.name)
 			close(c.send)
 		}
 	}
@@ -85,32 +99,37 @@ func handleConn(h *hub, conn net.Conn) {
 	_ = conn.SetReadDeadline(time.Time{})
 
 	c := &client{conn: conn, name: hello.From, send: make(chan protocol.Message, sendQueueSize)}
+	c.room = hello.Room
+	if c.room == "" {
+		c.room = protocol.DefaultRoom
+	}
 
 	h.mu.Lock()
-	if _, taken := h.clients[c.name]; taken {
+	members := h.members(c.room)
+	if _, taken := members[c.name]; taken {
 		h.mu.Unlock()
-		reject(conn, fmt.Sprintf("name %q is already taken", c.name))
+		reject(conn, fmt.Sprintf("name %q is already taken in room %q", c.name, c.room))
 		return
 	}
-	h.clients[c.name] = c
+	members[c.name] = c
 	h.mu.Unlock()
 
 	// Announce after registering so the newcomer also sees its own join.
-	h.broadcast(protocol.Message{V: 1, Type: protocol.TypeJoin, From: c.name})
-	log.Printf("client connected: %s (%s)", c.name, conn.RemoteAddr())
+	h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeJoin, From: c.name, Room: c.room})
+	log.Printf("client connected: %s to #%s (%s)", c.name, c.room, conn.RemoteAddr())
 
 	removed := false
 	defer func() {
 		h.mu.Lock()
-		if cur, ok := h.clients[c.name]; ok && cur == c {
-			delete(h.clients, c.name)
+		if cur, ok := h.rooms[c.room][c.name]; ok && cur == c {
+			delete(h.rooms[c.room], c.name)
 			close(c.send)
 			removed = true
 		}
 		h.mu.Unlock()
 		if removed {
-			h.broadcast(protocol.Message{V: 1, Type: protocol.TypeLeave, From: c.name})
-			log.Printf("client disconnected: %s (%s)", c.name, conn.RemoteAddr())
+			h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeLeave, From: c.name, Room: c.room})
+			log.Printf("client disconnected: %s from #%s (%s)", c.name, c.room, conn.RemoteAddr())
 		}
 	}()
 
@@ -123,8 +142,8 @@ func handleConn(h *hub, conn net.Conn) {
 		if m.Type != protocol.TypeMsg || m.Body == "" {
 			continue
 		}
-		// Stamp From server-side; never trust the client's claim.
-		h.broadcast(protocol.Message{V: 1, Type: protocol.TypeMsg, From: c.name, Body: m.Body})
+		// Stamp From and Room server-side; never trust the client's claim.
+		h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeMsg, From: c.name, Room: c.room, Body: m.Body})
 	}
 }
 
@@ -139,7 +158,7 @@ func main() {
 	defer ln.Close()
 	fmt.Printf("tcp-chat server listening on %s\n", ln.Addr())
 
-	h := &hub{clients: make(map[string]*client)}
+	h := &hub{rooms: make(map[string]map[string]*client)}
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
