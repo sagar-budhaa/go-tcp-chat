@@ -11,9 +11,45 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
+	"sync"
 
 	"tcp-chat/internal/protocol"
 )
+
+// roster tracks who is in the room from join/leave frames, including the
+// synthetic joins the server replays for members who arrived before us.
+type roster struct {
+	mu sync.Mutex
+	set map[string]struct{}
+}
+
+func (r *roster) track(m protocol.Message) {
+	switch m.Type {
+	case protocol.TypeJoin:
+		if m.From == "" {
+			return
+		}
+		r.mu.Lock()
+		r.set[m.From] = struct{}{}
+		r.mu.Unlock()
+	case protocol.TypeLeave:
+		r.mu.Lock()
+		delete(r.set, m.From)
+		r.mu.Unlock()
+	}
+}
+
+func (r *roster) list() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	names := make([]string, 0, len(r.set))
+	for n := range r.set {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
 
 func print(m protocol.Message) {
 	switch m.Type {
@@ -92,8 +128,10 @@ func main() {
 	if first.Type == protocol.TypeError {
 		log.Fatalf("server rejected: %s", first.Body)
 	}
+	members := &roster{set: make(map[string]struct{})}
+	members.track(first)
 	print(first)
-	fmt.Printf("connected to %s as %s in #%s (/dm <name> <text> for DMs, /quit to exit)\n> ", *addr, *name, first.Room)
+	fmt.Printf("connected to %s as %s in #%s (/dm <name> <text> for DMs, /members to list, /quit to exit)\n> ", *addr, *name, first.Room)
 
 	// Reader: server -> stdout. Exits process on disconnect since stdin
 	// would otherwise block forever with nowhere to send.
@@ -112,6 +150,7 @@ func main() {
 				fmt.Printf("\nserver error: %s\n> ", m.Body)
 				continue
 			}
+			members.track(m)
 			print(m)
 		}
 	}()
@@ -123,6 +162,22 @@ func main() {
 		line := scanner.Text()
 		if line == "/quit" {
 			return
+		}
+		if line == "/members" {
+			names := members.list()
+			if len(names) == 0 {
+				fmt.Print("(no members tracked yet)\n> ")
+				continue
+			}
+			fmt.Printf("members (%d): ", len(names))
+			for i, n := range names {
+				if i > 0 {
+					fmt.Print(", ")
+				}
+				fmt.Print(n)
+			}
+			fmt.Print("\n> ")
+			continue
 		}
 		if line == "" {
 			fmt.Print("> ")
