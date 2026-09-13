@@ -64,6 +64,41 @@ func (h *hub) broadcast(room string, m protocol.Message) {
 	}
 }
 
+// direct queues m for one named member of room. Returns false when the
+// target is absent or its queue is full (caller drops slow clients).
+func (h *hub) direct(room, name string, m protocol.Message) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c, ok := h.rooms[room][name]
+	if !ok {
+		return false
+	}
+	select {
+	case c.send <- m:
+		return true
+	default:
+		log.Printf("client slow, disconnecting: %s (%s)", c.name, c.conn.RemoteAddr())
+		go c.conn.Close()
+		delete(h.rooms[room], c.name)
+		close(c.send)
+		return false
+	}
+}
+
+// sendError queues a non-fatal error frame to one client without closing.
+// Dropped when the queue is full; the slow-client path handles cleanup.
+func (h *hub) sendError(c *client, reason string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cur, ok := h.rooms[c.room][c.name]; !ok || cur != c {
+		return
+	}
+	select {
+	case c.send <- protocol.Message{V: 1, Type: protocol.TypeError, Body: reason}:
+	default:
+	}
+}
+
 // writer pumps queued messages to the socket. Single writer per conn, so
 // concurrent broadcasts can't interleave frames.
 func writer(c *client) {
@@ -139,11 +174,31 @@ func handleConn(h *hub, conn net.Conn) {
 		if err != nil {
 			return // EOF or bad frame: just drop the client
 		}
-		if m.Type != protocol.TypeMsg || m.Body == "" {
+		switch m.Type {
+		case protocol.TypeMsg:
+			if m.Body == "" {
+				continue
+			}
+			// Stamp From and Room server-side; never trust the client's claim.
+			h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeMsg, From: c.name, Room: c.room, Body: m.Body})
+		case protocol.TypeDM:
+			if m.Body == "" || m.To == "" {
+				continue
+			}
+			out := protocol.Message{V: 1, Type: protocol.TypeDM, From: c.name, Room: c.room, To: m.To, Body: m.Body}
+			if m.To == c.name {
+				_ = h.direct(c.room, c.name, out)
+				continue
+			}
+			if !h.direct(c.room, m.To, out) {
+				h.sendError(c, fmt.Sprintf("no user %q in room %q", m.To, c.room))
+				continue
+			}
+			// Echo to sender so its UI can show what was sent.
+			_ = h.direct(c.room, c.name, out)
+		default:
 			continue
 		}
-		// Stamp From and Room server-side; never trust the client's claim.
-		h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeMsg, From: c.name, Room: c.room, Body: m.Body})
 	}
 }
 
