@@ -1,0 +1,7 @@
+# Built binaries and test artifacts
+*.exe
+*.out
+*.test
+*.prof
+coverage.out
+/bin/
