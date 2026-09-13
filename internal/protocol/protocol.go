@@ -26,6 +26,7 @@ const DefaultRoom = "general"
 const (
 	TypeHello = "hello" // client -> server, first frame, From = wanted name
 	TypeMsg   = "msg"   // both directions; server stamps From itself
+	TypeDM    = "dm"    // client -> server, To = target; server delivers to target + sender echo
 	TypeJoin  = "join"  // server -> all, From = newcomer
 	TypeLeave = "leave" // server -> all, From = departee
 	TypeError = "error" // server -> client, Body = reason, then close
@@ -33,10 +34,12 @@ const (
 
 // Message is the JSON envelope carried inside every frame. Room is
 // stamped by the server on relayed traffic; clients set it on hello.
+// To carries the DM target and is only set on TypeDM frames.
 type Message struct {
 	V    int    `json:"v"`
 	From string `json:"from,omitempty"`
 	Room string `json:"room,omitempty"`
+	To   string `json:"to,omitempty"`
 	Type string `json:"type"`
 	Body string `json:"body,omitempty"`
 }
@@ -47,7 +50,7 @@ func (m Message) Validate() error {
 		return fmt.Errorf("protocol: unsupported version %d", m.V)
 	}
 	switch m.Type {
-	case TypeHello, TypeMsg, TypeJoin, TypeLeave, TypeError:
+	case TypeHello, TypeMsg, TypeJoin, TypeLeave, TypeError, TypeDM:
 	default:
 		return fmt.Errorf("protocol: unknown type %q", m.Type)
 	}
@@ -56,6 +59,16 @@ func (m Message) Validate() error {
 	}
 	if len(m.Room) > MaxRoomLen {
 		return fmt.Errorf("protocol: room %q exceeds max %d", m.Room, MaxRoomLen)
+	}
+	if m.Type == TypeDM {
+		if m.To == "" {
+			return fmt.Errorf("protocol: dm requires a target")
+		}
+		if len(m.To) > MaxNameLen {
+			return fmt.Errorf("protocol: dm target %q exceeds max %d", m.To, MaxNameLen)
+		}
+	} else if m.To != "" {
+		return fmt.Errorf("protocol: field \"to\" only valid on dm frames")
 	}
 	return nil
 }
