@@ -16,6 +16,12 @@ const MaxMessageSize = 1 << 20
 // MaxNameLen caps client names; enforced during validation.
 const MaxNameLen = 32
 
+// MaxRoomLen caps room names; enforced during validation.
+const MaxRoomLen = 32
+
+// DefaultRoom is where the server puts clients that name no room.
+const DefaultRoom = "general"
+
 // Message types on the wire.
 const (
 	TypeHello = "hello" // client -> server, first frame, From = wanted name
@@ -25,10 +31,12 @@ const (
 	TypeError = "error" // server -> client, Body = reason, then close
 )
 
-// Message is the JSON envelope carried inside every frame.
+// Message is the JSON envelope carried inside every frame. Room is
+// stamped by the server on relayed traffic; clients set it on hello.
 type Message struct {
 	V    int    `json:"v"`
 	From string `json:"from,omitempty"`
+	Room string `json:"room,omitempty"`
 	Type string `json:"type"`
 	Body string `json:"body,omitempty"`
 }
@@ -45,6 +53,9 @@ func (m Message) Validate() error {
 	}
 	if len(m.From) > MaxNameLen {
 		return fmt.Errorf("protocol: name %q exceeds max %d", m.From, MaxNameLen)
+	}
+	if len(m.Room) > MaxRoomLen {
+		return fmt.Errorf("protocol: room %q exceeds max %d", m.Room, MaxRoomLen)
 	}
 	return nil
 }
