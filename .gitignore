@@ -5,3 +5,11 @@
 *.prof
 coverage.out
 /bin/
+
+# SQLite history (runtime data, incl. dev certs below)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+cert.pem
+key.pem

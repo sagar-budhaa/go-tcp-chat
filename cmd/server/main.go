@@ -1,6 +1,7 @@
 // Command server: multi-client TCP chat with rooms. Clients introduce
 // themselves with a hello frame naming a room; chat messages and
-// join/leave notices stay within that room.
+// join/leave notices stay within that room. Recent history is replayed
+// from SQLite on join.
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"tcp-chat/internal/protocol"
+	"tcp-chat/internal/store"
 )
 
 // sendQueueSize bounds per-client backlog so one slow reader can never
@@ -34,6 +36,17 @@ type hub struct {
 	// rooms maps room -> name -> client. Names need only be unique
 	// within their room.
 	rooms map[string]map[string]*client
+	store *store.Store
+}
+
+// persist saves msg/dm history, fail-open so a DB hiccup never drops chat.
+func (h *hub) persist(m protocol.Message) {
+	if h.store == nil {
+		return
+	}
+	if err := h.store.Save(m); err != nil {
+		log.Printf("history save: %v", err)
+	}
 }
 
 // members returns the room's set, creating it on first use. Caller must
@@ -149,6 +162,22 @@ func handleConn(h *hub, conn net.Conn) {
 	members[c.name] = c
 	h.mu.Unlock()
 
+	// Replay recent history straight to the newcomer before its writer
+	// starts, so only it sees the backlog and frames can't interleave.
+	if h.store != nil {
+		if hist, err := h.store.Recent(c.room, 50); err != nil {
+			log.Printf("history replay: %v", err)
+		} else {
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			for _, m := range hist {
+				if err := protocol.WriteJSON(conn, m); err != nil {
+					conn.Close()
+					return
+				}
+			}
+		}
+	}
+
 	// Announce after registering so the newcomer also sees its own join.
 	h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeJoin, From: c.name, Room: c.room})
 	log.Printf("client connected: %s to #%s (%s)", c.name, c.room, conn.RemoteAddr())
@@ -180,12 +209,15 @@ func handleConn(h *hub, conn net.Conn) {
 				continue
 			}
 			// Stamp From and Room server-side; never trust the client's claim.
-			h.broadcast(c.room, protocol.Message{V: 1, Type: protocol.TypeMsg, From: c.name, Room: c.room, Body: m.Body})
+			out := protocol.Message{V: 1, Type: protocol.TypeMsg, From: c.name, Room: c.room, Body: m.Body}
+			h.persist(out)
+			h.broadcast(c.room, out)
 		case protocol.TypeDM:
 			if m.Body == "" || m.To == "" {
 				continue
 			}
 			out := protocol.Message{V: 1, Type: protocol.TypeDM, From: c.name, Room: c.room, To: m.To, Body: m.Body}
+			h.persist(out)
 			if m.To == c.name {
 				_ = h.direct(c.room, c.name, out)
 				continue
@@ -204,16 +236,23 @@ func handleConn(h *hub, conn net.Conn) {
 
 func main() {
 	addr := flag.String("addr", ":9000", "listen address, e.g. :9000 or 127.0.0.1:9000")
+	dbPath := flag.String("db", "chat.db", "sqlite history file (persisted per room)")
 	flag.Parse()
+
+	st, err := store.Open(*dbPath)
+	if err != nil {
+		log.Fatalf("open db %s: %v", *dbPath, err)
+	}
+	defer st.Close()
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		log.Fatalf("listen %s: %v", *addr, err)
 	}
 	defer ln.Close()
-	fmt.Printf("tcp-chat server listening on %s\n", ln.Addr())
+	fmt.Printf("tcp-chat server listening on %s (db %s)\n", ln.Addr(), *dbPath)
 
-	h := &hub{rooms: make(map[string]map[string]*client)}
+	h := &hub{rooms: make(map[string]map[string]*client), store: st}
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
