@@ -18,11 +18,33 @@ func print(m protocol.Message) {
 	switch m.Type {
 	case protocol.TypeMsg:
 		fmt.Printf("[%s] %s\n> ", m.From, m.Body)
+	case protocol.TypeDM:
+		fmt.Printf("[dm %s -> %s] %s\n> ", m.From, m.To, m.Body)
 	case protocol.TypeJoin:
 		fmt.Printf("*** %s joined #%s ***\n> ", m.From, m.Room)
 	case protocol.TypeLeave:
 		fmt.Printf("*** %s left #%s ***\n> ", m.From, m.Room)
 	}
+}
+
+// parseDM parses "/dm <name> <text>". Returns ok=false when line is not a DM.
+func parseDM(line string) (to, body string, ok bool) {
+	if len(line) < 5 || line[:4] != "/dm " {
+		return "", "", false
+	}
+	rest := line[4:]
+	i := 0
+	for i < len(rest) && rest[i] != ' ' {
+		i++
+	}
+	if i == 0 || i == len(rest) {
+		return "", "", false
+	}
+	to, body = rest[:i], rest[i+1:]
+	if to == "" || body == "" {
+		return "", "", false
+	}
+	return to, body, true
 }
 
 func main() {
@@ -55,7 +77,7 @@ func main() {
 		log.Fatalf("server rejected: %s", first.Body)
 	}
 	print(first)
-	fmt.Printf("connected to %s as %s in #%s (type /quit to exit)\n> ", *addr, *name, first.Room)
+	fmt.Printf("connected to %s as %s in #%s (/dm <name> <text> for DMs, /quit to exit)\n> ", *addr, *name, first.Room)
 
 	// Reader: server -> stdout. Exits process on disconnect since stdin
 	// would otherwise block forever with nowhere to send.
@@ -71,8 +93,8 @@ func main() {
 				os.Exit(0)
 			}
 			if m.Type == protocol.TypeError {
-				fmt.Printf("\nserver error: %s\n", m.Body)
-				os.Exit(1)
+				fmt.Printf("\nserver error: %s\n> ", m.Body)
+				continue
 			}
 			print(m)
 		}
@@ -90,7 +112,13 @@ func main() {
 			fmt.Print("> ")
 			continue
 		}
-		if err := protocol.WriteJSON(conn, protocol.Message{V: 1, Type: protocol.TypeMsg, Body: line}); err != nil {
+		var out protocol.Message
+		if to, body, ok := parseDM(line); ok {
+			out = protocol.Message{V: 1, Type: protocol.TypeDM, To: to, Body: body}
+		} else {
+			out = protocol.Message{V: 1, Type: protocol.TypeMsg, Body: line}
+		}
+		if err := protocol.WriteJSON(conn, out); err != nil {
 			log.Fatalf("send: %v", err)
 		}
 		fmt.Print("> ")
