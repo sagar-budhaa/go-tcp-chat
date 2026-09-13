@@ -75,6 +75,8 @@ func TestEnvelopeRoundTrip(t *testing.T) {
 		{V: 1, Type: TypeJoin, From: "bob"},
 		{V: 1, Type: TypeLeave, From: "bob"},
 		{V: 1, Type: TypeError, Body: "name taken"},
+		{V: 1, Type: TypeHello, From: "alice", Room: "sports"},
+		{V: 1, Type: TypeMsg, From: "alice", Room: "sports", Body: "go team"},
 	} {
 		var buf bytes.Buffer
 		if err := WriteJSON(&buf, m); err != nil {
@@ -96,6 +98,7 @@ func TestEnvelopeValidation(t *testing.T) {
 		{V: 2, Type: TypeMsg, Body: "bad version"},
 		{V: 1, Type: "nope", Body: "unknown type"},
 		{V: 1, Type: TypeHello, From: string(bytes.Repeat([]byte("n"), MaxNameLen+1))},
+		{V: 1, Type: TypeHello, From: "alice", Room: string(bytes.Repeat([]byte("r"), MaxRoomLen+1))},
 	} {
 		buf.Reset()
 		if err := WriteJSON(&buf, m); err == nil {
