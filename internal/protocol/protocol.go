@@ -15,7 +15,7 @@ const MaxMessageSize = 1 << 20
 // WriteMessage writes one length-prefixed frame to w.
 func WriteMessage(w io.Writer, payload []byte) error {
 	if len(payload) > MaxMessageSize {
-		return fmt.Errorf("protocol: payload %d bytes excexeds max %d", len(payload), MaxMessageSize)
+		return fmt.Errorf("protocol: payload %d bytes exceeds max %d", len(payload), MaxMessageSize)
 	}
 	var hdr [4]byte
 	binary.BigEndian.PutUint32(hdr[:], uint32(len(payload)))
