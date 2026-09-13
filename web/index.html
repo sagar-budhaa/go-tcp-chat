@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tcp-chat web</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<main class="layout">
+  <section class="login" id="login">
+    <h1>tcp-chat</h1>
+    <label>Name <input id="name" maxlength="32" placeholder="alice" /></label>
+    <label>Room <input id="room" maxlength="32" value="general" /></label>
+    <button id="join">Join</button>
+    <p class="hint">History replays on join. DMs use <code>/dm bob hi</code> or the DM box.</p>
+  </section>
+
+  <section class="chat hidden" id="chat">
+    <header>
+      <strong id="title">#general</strong>
+      <span id="status">connecting…</span>
+      <button id="leave">Leave</button>
+    </header>
+    <div class="cols">
+      <div class="msgs" id="msgs"></div>
+      <aside class="members">
+        <h2>Members</h2>
+        <ul id="members"></ul>
+      </aside>
+    </div>
+    <form id="dmform" class="dmrow">
+      <input id="dmto" maxlength="32" placeholder="dm to…" />
+      <input id="dmtext" placeholder="private message…" />
+      <button type="submit">DM</button>
+    </form>
+    <form id="msgform" class="msgrow">
+      <input id="msgtext" autocomplete="off" placeholder="message… (/quit leaves)" />
+      <button type="submit">Send</button>
+    </form>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

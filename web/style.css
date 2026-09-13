@@ -1,0 +1,16 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #111; color: #eee; }
+.layout { max-width: 900px; margin: 0 auto; padding: 16px; }
+.login input, .msgrow input, .dmrow input { background: #222; color: #eee; border: 1px solid #444; padding: 8px; margin: 4px; }
+button { padding: 8px 12px; cursor: pointer; }
+.hidden { display: none; }
+header { display: flex; gap: 12px; align-items: center; }
+.cols { display: grid; grid-template-columns: 3fr 1fr; gap: 12px; margin: 12px 0; }
+.msgs { height: 50vh; overflow-y: auto; background: #000; padding: 8px; border: 1px solid #333; }
+.members { background: #181818; padding: 8px; border: 1px solid #333; }
+.members ul { list-style: none; padding: 0; }
+.dm { color: #c9f; }
+.sys { color: #8cf; }
+.err { color: #f88; }
+.hint { color: #999; }
+.msgrow, .dmrow { display: flex; gap: 8px; margin-top: 8px; }
+.msgrow input, .dmrow input:nth-child(2) { flex: 1; }
