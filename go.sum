@@ -18,3 +18,5 @@ modernc.org/memory v1.12.1 h1:nFMiWrpStgZczNl6XI9GnIk/rWhYIyHGUaR04pGbp9g=
 modernc.org/memory v1.12.1/go.mod h1:/JP4VbVC+K5sU2wZi9bHoq2MAkCnrt2r98UGeSK7Mjw=
 modernc.org/sqlite v1.58.0 h1:38u40/bwkfM7f0Myhosl+SEMltSDxnGdQf8o6Kjmys0=
 modernc.org/sqlite v1.58.0/go.mod h1:rsD2CckafgObKC4DhBlGBf+RiHxkc3hINGt1Xw32tVY=
+nhooyr.io/websocket v1.8.17 h1:KEVeLJkUywCKVsnLIDlD/5gtayKp8VoCkksHCGGfT9Y=
+nhooyr.io/websocket v1.8.17/go.mod h1:rN9OFWIUwuxg4fR5tELlYC04bXYowCP9GX47ivo2l+c=
