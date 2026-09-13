@@ -1,5 +1,5 @@
-// Command client: connects to a tcp-chat server as --name, sends each
-// stdin line as a chat message, prints messages and join/leave notices.
+// Command client: connects to a tcp-chat server room as --name, sends
+// each stdin line as a chat message, prints messages and join/leave.
 package main
 
 import (
@@ -19,18 +19,22 @@ func print(m protocol.Message) {
 	case protocol.TypeMsg:
 		fmt.Printf("[%s] %s\n> ", m.From, m.Body)
 	case protocol.TypeJoin:
-		fmt.Printf("*** %s joined ***\n> ", m.From)
+		fmt.Printf("*** %s joined #%s ***\n> ", m.From, m.Room)
 	case protocol.TypeLeave:
-		fmt.Printf("*** %s left ***\n> ", m.From)
+		fmt.Printf("*** %s left #%s ***\n> ", m.From, m.Room)
 	}
 }
 
 func main() {
 	addr := flag.String("addr", "localhost:9000", "server address, e.g. localhost:9000")
-	name := flag.String("name", "", "chat name (required, max 32 chars, must be unique)")
+	name := flag.String("name", "", "chat name (required, max 32 chars, unique per room)")
+	room := flag.String("room", protocol.DefaultRoom, "room to join")
 	flag.Parse()
 	if *name == "" || len(*name) > protocol.MaxNameLen {
 		log.Fatalf("need --name of 1-%d chars", protocol.MaxNameLen)
+	}
+	if *room == "" || len(*room) > protocol.MaxRoomLen {
+		log.Fatalf("need --room of 1-%d chars", protocol.MaxRoomLen)
 	}
 
 	conn, err := net.Dial("tcp", *addr)
@@ -39,7 +43,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	if err := protocol.WriteJSON(conn, protocol.Message{V: 1, Type: protocol.TypeHello, From: *name}); err != nil {
+	if err := protocol.WriteJSON(conn, protocol.Message{V: 1, Type: protocol.TypeHello, From: *name, Room: *room}); err != nil {
 		log.Fatalf("hello: %v", err)
 	}
 	// The server answers a bad handshake with an error frame, not silence.
@@ -51,7 +55,7 @@ func main() {
 		log.Fatalf("server rejected: %s", first.Body)
 	}
 	print(first)
-	fmt.Printf("connected to %s as %s (type /quit to exit)\n> ", *addr, *name)
+	fmt.Printf("connected to %s as %s in #%s (type /quit to exit)\n> ", *addr, *name, first.Room)
 
 	// Reader: server -> stdout. Exits process on disconnect since stdin
 	// would otherwise block forever with nowhere to send.
